@@ -1,0 +1,411 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE, warning=FALSE, message=FALSE, cache.path="milestone_cache/", fig.path="./figure/")
+```
+
+---
+title: "Data Science Capstone - Milestone Report"
+author: "Toby Lam"
+date: "Tuesday, November 11, 2014"
+output: html_document
+---
+
+The goal of this milestone report is to 
+
+1. Demonstrate that I've downloaded the data and have successfully loaded it in.
+2. Provide a basic report of summary statistics about the data sets.
+3. Report some interesting findings.
+
+### 1. Data Acquisition
+
+The Coursera-SwiftKey.zip was downloaded from the Coursera page and it was extracted in the folder &lt;working directory&gt;/corpus/txt.
+There are three files:
+
+1. en_US.blogs.txt (BLOGS)
+2. en_US.news.txt (NEWS)
+3. en_US.twitter.txt (TWITTER)
+
+Refer to [1], the data were collected from publicly available sources by a web crawler. Note that the content of the text files may contain non-English words. Thus, it is necessary to perform preprocessing to filter irrevlant characters / symbols. The details will be shown in the Section 2.
+
+The __tm__ package, which is a framework for text mining applications within R [2], was adopted to load the text files. 
+
+
+```{r}
+library(tm)
+library(doSNOW) #mutli-core
+cl = makeCluster(3)
+registerDoSNOW(cl)
+
+#set working directory
+setwd("~/CapStone")
+ 
+#text files path
+txtPath = paste(getwd(), "/corpus/txt" ,sep="")
+
+#load three files as UTF-8 encoding
+docs = Corpus(DirSource(txtPath, encoding="UTF-8"),readerControl = list(reader=readPlain, language="en_US"))
+
+#verify the docs
+print(meta(docs[[1]])) #en_US.blogs.txt
+print(meta(docs[[2]])) #en_US.news.txt
+print(meta(docs[[3]])) #en_US.twitter.txt
+
+```
+
+### 2. Summaries of Three Files
+In this section, some statisical information of is shown.
+
+#### 2.1 Line Counts
+First, I would like to know how many line for each text file. To ease for presentation, from now on, I will use the keyword __BLOGS__ to refer en_US_blogs.txt, __NEWS__ to refer en_US_news.txt and __TWITTER__ to refer en_US_twitter.txt. 
+```{r}
+BLOGS = 1   #en_US_blogs.txt
+NEWS = 2    #en_US_news.txt
+TWITTER = 3 #en_US_twitter.txt
+
+#get line of each file
+print(paste("Line counts for BLOGS:", length(docs[[BLOGS]])))
+print(paste("Line counts for NEWS:", length(docs[[NEWS]])))
+print(paste("Line counts for TWITTER:", length(docs[[TWITTER]])))
+
+```
+Refer to the above result, TWITTER contains most number of line, while NEWS have the least number of line. 
+
+#### 2.2 Word Counts
+Next, I would like to check how many words in each file. To get a brief word counts, I simply considered that each __word__ is spereated with a whitespace in each sentence. The __word__ may be English or non-English. Thus, to get the correct word count, we would split the line with respect to the whitespace and then count how many items (i.e. words). 
+
+For example: "This is a sample sentence." 
+
+Refer to the described algorithm, the total word count for this example is: 5
+
+```{r}
+library(stringi)
+
+getLowercaseWords = function(lst){
+  words = unlist(strsplit(lst, " "))
+  words = stri_trans_tolower(words)
+  words
+}
+
+
+#get the words of each data file
+blogs_words = getLowercaseWords(docs[[BLOGS]])
+news_words = getLowercaseWords(docs[[NEWS]])
+twitter_words = getLowercaseWords(docs[[TWITTER]])
+
+print(paste("Word counts in BLOGS: ", length(blogs_words)))
+print(paste("Word counts in NEWS: ", length(news_words)))
+print(paste("Word counts in TWITTER: ", length(twitter_words)))
+```
+
+Refer to the above result, BLOGS contains the most number of words, while NEWS have the least number of words.
+
+#### 2.3 Unique Word Counts
+As mentioned, the text in the files may contains non-English words. When I exploring the data, I found there are really some non-English words (e.g. Chinese and special symbols) in the data. Some examples are shown as follows:
+
+```{r}
+#with special character
+print(docs[[BLOGS]][899288]) #end with three small dots
+print(docs[[TWITTER]][164146]) #with special unicode value
+print(docs[[TWITTER]][1584842]) #with Chinese character
+```
+
+To get the total number of unique English words in each text file, it is necessary to filter irrevlant data. I assumed that a proper English word contains character (A-Z, a-z) and single quote(') only. 
+
+To get the English words from the text file, my proposed filtering algorithm is as follows:
+
+- replace the curly quote to single quote
+- replace non printable character, except '
+- remove digits
+- remove word with single quote only, except quote used in words (e.g. we've, ours')
+- remove all word with whitespace only and empty string
+
+```{r}
+removeDigits = function(lst){
+  lst = stri_replace_all_regex(lst,"[0-9]+","")
+  #get the index withempty string or words with whitespace
+  removeIdx = which(grepl("^\\s*$", lst))
+  #remove all emtpy string / words with whitespace
+  if (length(removeIdx) > 0){
+    lst = lst[-removeIdx]   
+  }  
+  lst  
+}
+
+getEnglishWords = function(lst){
+  #replace curly brace with single quote 
+  lst = stri_replace_all_regex(lst,"\u2019|`","'")
+  
+  #replace non printable, except ' - and space with empty string
+  lst = stri_replace_all_regex(lst,"[^\\p{L}\\s']","")
+  
+  #remove digits
+  lst = removeDigits(lst)
+  
+  #remove non English words
+  removeIdx = which(grepl("[^A-Za-z]", lst))
+  if (length(removeIdx) > 0){
+    lst = lst[-removeIdx]  
+  }
+  #remove signal quote, except quote used in words e.g. didn't, we've, ours'
+  lst = stri_replace_all_regex(lst, "[^A-Za-z]'+[^A-Za-z]", "")
+
+  #remove all emtpy string / words with whitespace
+  removeIdx = which(grepl("^\\s*$", lst))  
+  if (length(removeIdx) > 0){  
+    lst = lst[-removeIdx]   
+  }
+  
+  lst
+}
+
+#check the unique word counts in each file
+blogs_words_English = getEnglishWords(blogs_words)
+print(paste("Number of unique word in BLOGS: ", length(unique(blogs_words_English))))
+
+news_words_English = getEnglishWords(news_words)
+print(paste("Number of unique word in NEWS: ", length(unique(news_words_English))))
+
+twitter_words_English = getEnglishWords(twitter_words)
+print(paste("Number of unique word in TWITTER: ", length(unique(twitter_words_English))))
+```
+
+```{r}
+library(reshape) # for melt function
+library(ggplot2) # for ploting graphs
+
+#prepare the data
+df = data.frame(wc=c(length(blogs_words_English), length(news_words_English), length(twitter_words_English)), uwc=c(length(unique(blogs_words_English)), length(unique(news_words_English)), length(unique(twitter_words_English))), type=c("BLOGS", "NEWS", "TWITTER"))
+
+df = melt(df, id="type")
+
+ggplot(df, aes(x=type, y=value, fill=variable)) + theme_bw() + geom_bar(position="dodge", stat="identity") + labs(x="SOURCE", y="COUNTS", title="The Number of Words and Unique English Words in Three Files") + scale_fill_discrete(name="TYPE", labels=c('words', 'unique words'))
+
+```
+
+Further, I would like to check the total number of unique English words from three text files.
+
+```{r}
+#get all the unique words from three datasets
+allUniqueWords = append(unique(blogs_words_English), unique(news_words_English))
+allUniqueWords = append(unique(allUniqueWords), unique(twitter_words_English))
+allUniqueWords = unique(allUniqueWords)
+
+print(paste("Total number of unique words from three files:", length(allUniqueWords)))
+```
+
+According to an article [3], the number of English words is around 1.1 million. The total number of unique English words is around 851 thousands. Thus, the unique English words from three data files  is around 77% converage of the English words.
+
+#### 2.4 Words from Foreign Language
+
+To get the number of words from foreign language, I used the similar approach as getting English. The algorithm for detecting foreign language word is as follows:
+
+- replace the curly quote to single quote
+- replace non printable character, except '
+- remove digits
+- remove all word with letter a-z and quote
+- remove all word with whitespace only and empty string
+
+```{r}
+getNonEnglishWords = function(lst){
+  #replace curly brace with single quote 
+  lst = stri_replace_all_regex(lst,"\u2019|`","'")
+  
+  #replace non printable, except ' - and space with empty string
+  lst = stri_replace_all_regex(lst,"[^\\p{L}\\s']","")
+  
+  #remove digits
+  lst = removeDigits(lst)
+  
+  #get non English words
+  nonEnglishIdx = which(grepl("[^A-Za-z']", lst))
+  if (length(nonEnglishIdx) > 0){
+    lst = lst[nonEnglishIdx]  
+  }
+  #remove signal quote, except quote used in words e.g. didn't, we've, ours'
+  lst = stri_replace_all_regex(lst, "[^A-Za-z]'+[^A-Za-z]", "")
+
+  #remove all emtpy string / words with whitespace
+  removeIdx = which(grepl("^\\s*$", lst))  
+  if (length(removeIdx) > 0){  
+    lst = lst[-removeIdx]   
+  }
+  
+  lst
+}
+#get all the unique words from three datasets
+blogs_words_NonEnglish = getNonEnglishWords(blogs_words)
+print(paste("Number of unique non English word in BLOGS: ", length(unique(blogs_words_NonEnglish))))
+
+news_words_NonEnglish = getNonEnglishWords(news_words)
+print(paste("Number of unique non English word in NEWS: ", length(unique(news_words_NonEnglish))))
+
+twitter_words_NonEnglish = getNonEnglishWords(twitter_words)
+print(paste("Number of unique non English word in TWITTER: ", length(unique(twitter_words_NonEnglish))))
+
+
+#check how many non-English word
+#get all the unique words from three datasets
+allUniqueNonEnglishWords = append(unique(blogs_words_NonEnglish), unique(news_words_NonEnglish))
+allUniqueNonEnglishWords = append(unique(allUniqueNonEnglishWords), unique(twitter_words_NonEnglish))
+allUniqueNonEnglishWords = unique(allUniqueNonEnglishWords)
+
+print(paste("Total number of unique non-English words:", length(allUniqueNonEnglishWords)))
+print(paste("Total number of unique English words:", length(allUniqueWords)))
+
+#print the table
+df = data.frame(type=c("English", "Non-English"), count=c(length(allUniqueWords), length(allUniqueNonEnglishWords)))
+
+df
+```
+
+Please note that some word in the three files may be not a valid English word. Since, in Twitter, the tweet length is up to 140 characters [4], sometimes the user would like to save the number of characters and he/she may use short form (e.g. BTW - By the way) and merge words together (e.g. howru - how are you). 
+
+From my point of view, I considered these "new" type of words as valid. Thus, I did not remove those words from the word list.
+
+The ratio between English and non-English word is around 85:1. 
+
+#### 2.5 Most Freqently Used Word
+
+In this section, I would like to look for the most frequently used word from the data files.
+```{r}
+#get English words only
+words = append(blogs_words_English, news_words_English)
+words = append(words, twitter_words_English)
+
+#get most frequent word
+mfw = sort(table(words), decreasing=TRUE)
+totalUniqueWords = length(names(mfw))
+top20 = head(mfw, 20)
+barplot(top20, border=NA, las=2, main="Top 20 Most Frequent Word", cex.main=1)
+```
+The most frequently used word from the three text files is __the__. The above histogram shows the top 20 most frequently used word in the data.
+
+#### 2.4 Words Converage
+
+If we used the entire word list from the data files to create the prediction model, it may be not feasible as it may cost too much memory and long processing time.  I would like to check if we sample the lines from each text file, the percentage of word converage (cover a range word instances in the language). In the following experiment, I sampled the line from the data from 5% to 100%, with step size 5%, then, check the words coverage.
+
+```{r}
+getUniqueWords = function(docs, samplingRate){
+  uniqueWords = list()
+  #for each document
+  for (i in 1:length(docs)){
+    #get the total number of line
+    totalNumLine = length(docs[[i]])
+    #generate totalNumLine tosses with biased coin
+    tosses = rbinom(totalNumLine, size=1, p=samplingRate)
+    extractIdx = which(tosses == 1)
+    #sampling
+    docs[[i]] = docs[[i]][extractIdx] 
+    
+    temp = getLowercaseWords(docs[[i]])
+    temp = unique(temp)
+    temp = getEnglishWords(temp)
+    temp = unique(temp)
+    uniqueWords = unique(append(uniqueWords, temp))
+  }
+  uniqueWords
+}
+
+step = seq(0.05, 1.0, 0.05)
+
+set.seed(1234)
+wCount= list()
+for (i in step){
+  uw = getUniqueWords(docs, i)
+  wCount = append(wCount, length(uw))  
+}
+
+coverage = (unlist(wCount) / totalUniqueWords) * 100.0
+plot(step, coverage, xlab="Sampling Rate", ylab="Word Converage (in %)")
+lines(step, coverage)
+title("Word Coverage VS Sampling Rate")
+```
+
+When the sampling rate is 0.35, the word coverage around 51.24%. 
+When the sampling rate is 0.85, the word coverage around 90.08%.
+
+#### 2.6 Most frequently used 2-gram and 3-gram (in sampling rate: 0.01)
+To save the processing time, I adopted the sampling rate as 0.01 (i.e., 1%) to extract the words from three text file. I would like to check the most commonly used 2-gram and 3-gram.
+
+```{r}
+getTokens = function(docs, samplingRate){
+  words = list()
+  #for each document
+  for (i in 1:length(docs)){
+    #get the total number of line
+    totalNumLine = length(docs[[i]])
+    #generate totalNumLine tosses with biased coin
+    tosses = rbinom(totalNumLine, size=1, p=samplingRate)
+    extractIdx = which(tosses == 1)
+    #sampling
+    docs[[i]] = docs[[i]][extractIdx] 
+    
+    temp = getLowercaseWords(docs[[i]])
+    temp = getEnglishWords(temp)
+    
+    words = append(words, temp)
+  }
+  unlist(words)
+}
+
+getNgram = function(listOfStr, n=2){
+  if (n==1){
+    listOfStr
+  }else{
+    #get the length of listOfStr
+    #print(listOfStr)
+    len = length(listOfStr)
+    if (len <= n){
+      list()
+    }else{
+      #print(paste("len:", len))
+      result = list()
+      for (i in seq(1, (len-(n-1)))){
+        #print(i)
+        #print(paste(listOfStr[i:(i+(n-1))], collapse=" "))
+        result = append(result, paste(listOfStr[i:(i+(n-1))], collapse=" "))
+      }
+      result      
+    }    
+  }
+}
+
+#get words from data files with samping rate 0.01
+words = getTokens(docs, samplingRate=0.01)
+
+# get 2 grams
+twoGrams = words
+twoGrams = paste0(twoGrams, rep(" ", length(twoGrams)))
+twoGrams = paste0(twoGrams[1:(length(twoGrams)-1)],stri_replace_all_regex(twoGrams[2:length(twoGrams)], "\\s", ""))
+
+
+# get 3 gram
+threeGrams = words
+threeGrams = paste0(threeGrams, rep(" ", length(threeGrams)))
+threeGrams = paste0(threeGrams[1:(length(threeGrams)-2)],threeGrams[2:(length(threeGrams)-1)])
+threeGrams = paste0(threeGrams, words[3:length(words)])
+
+
+#get most frequently used 2-gram & 3-gram
+mfw_2gram = sort(table(twoGrams), decreasing=TRUE)
+mfw_3gram = sort(table(threeGrams), decreasing=TRUE)
+top20_2gram = head(mfw_2gram, 20)
+top20_3gram = head(mfw_3gram, 20)
+
+#plot graphs
+barplot(top20_2gram, border=NA, las=2, main="Top 20 Most Frequent Two-Gram (in sampling rate: 0.01)", cex.main=1)
+barplot(top20_3gram, border=NA, las=2, main="Top 20 Most Frequent Three-Gram (in sampling rate: 0.01)", cex.main=1)
+```
+In the sampling rate 0.01, the most frequently used two-gram is __of the__ and three-gram is __one of the__.
+
+### 3. Future Plan
+The next task I would like to do is to:
+
+1. Read the materials about NLP to learn how to create a feasible prediction models for N-grams
+2. Create/fine-tune the prediction model 
+3. Test the prediction model, Repeat Step 4 until the performance is acceptable
+
+### Reference
+1. http://www.corpora.heliohost.org/aboutcorpus.html
+2. http://cran.r-project.org/web/packages/tm/index.html
+3. http://www.telegraph.co.uk/technology/internet/8207621/English-language-has-doubled-in-size-in-the-last-century.html
+4. https://dev.twitter.com/overview/api/counting-characters
