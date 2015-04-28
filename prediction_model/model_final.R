@@ -120,19 +120,14 @@ rm(unigram)
 #convert tokens words with number
 tokensInIdx = data.frame(tokens)
 tokensInIdx$wIdx = 0 #all wIdx is ZERO
-#scan thru each mapping
-nr = nrow(mapping)
-for (i in seq(nrow(mapping))){
-  if (i %% 100 == 0){
-    print(paste(i, "out of", nr))
-  }
-  w = as.character(mapping[i, w])
-  wIdx = as.integer(mapping[i, wIdx])
-  
-  #check all tokens
-  idx = (tokensInIdx$tokens == w)
-  tokensInIdx[idx, "wIdx"] = wIdx  
-}
+
+mapping$w <- as.character(mapping$w)   
+mapping$wIdx <- as.integer(mapping$wIdx)
+
+library(hash)
+dic <- hash(c(mapping$w), c(mapping$wIdx))  # build a word to index hash map
+f <- function(word) dic[[word]]
+tokensInIdx$wIdx <- sapply(tokensInIdx$tokens, f)
 
 mapping$wIdx = as.integer(rownames(mapping))
 setkey(mapping, w)
